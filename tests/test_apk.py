@@ -7,7 +7,7 @@ import hashlib
 import binascii
 from unittest.mock import patch, MagicMock
 
-from androguard.core import apk
+from androguard.core import apk, axml
 from androguard.core.analysis.analysis import Analysis
 from androguard.core.apk import APK
 from androguard.core.axml import AXMLPrinter
@@ -366,6 +366,8 @@ class APKTest(unittest.TestCase):
         self.assertTrue(isinstance(activities[0], str), 'activities[0] is not of type str')
 
     def testAPKIntentFilters(self):
+        from androguard.util import set_log
+        set_log("ERROR")
         a = APK(os.path.join(test_dir, 'data/APK/a2dp.Vol_137.apk'), testzip=True)
         activities = a.get_activities()
         receivers = a.get_receivers()
@@ -375,34 +377,26 @@ class APKTest(unittest.TestCase):
             filters = a.get_intent_filters("activity", i)
             if len(filters) > 0:
                 filter_list.append(filters)
+        self.assertEqual([{'action': ['android.intent.action.MAIN'], 'category': ['android.intent.category.LAUNCHER']}],
+                         filter_list)
+        filter_list = []
         for i in receivers:
             filters = a.get_intent_filters("receiver", i)
             if len(filters) > 0:
                 filter_list.append(filters)
+        for expected in [{
+            'action': ['android.intent.action.BOOT_COMPLETED', 'android.intent.action.MY_PACKAGE_REPLACED'],
+            'category': ['android.intent.category.HOME']}, {'action': ['android.appwidget.action.APPWIDGET_UPDATE']}]:
+            assert expected in filter_list
+        filter_list = []
         for i in services:
             filters = a.get_intent_filters("service", i)
             if len(filters) > 0:
                 filter_list.append(filters)
-
-        pairs = zip(filter_list, [{
-            'action': ['android.intent.action.MAIN'],
-            'category': ['android.intent.category.LAUNCHER']
-        }, {
-            'action': [
-                'android.intent.action.BOOT_COMPLETED',
-                'android.intent.action.MY_PACKAGE_REPLACED'
-            ],
-            'category': ['android.intent.category.HOME']
-        }, {
-            'action': ['android.appwidget.action.APPWIDGET_UPDATE']
-        }, {
-            'action': ['android.service.notification.NotificationListenerService']
-        }])
-        self.assertFalse(any(x != y for x, y in pairs))
+        self.assertEqual(filter_list, [{'action': ['android.service.notification.NotificationListenerService']}])
 
         a = APK(os.path.join(test_dir, 'data/APK/com.test.intent_filter.apk'), testzip=True)
 
-        activities = a.get_activities()
         activities = a.get_activities()
         receivers = a.get_receivers()
         services = a.get_services()
@@ -411,16 +405,7 @@ class APKTest(unittest.TestCase):
             filters = a.get_intent_filters("activity", i)
             if len(filters) > 0:
                 filter_list.append(filters)
-        for i in receivers:
-            filters = a.get_intent_filters("receiver", i)
-            if len(filters) > 0:
-                filter_list.append(filters)
-        for i in services:
-            filters = a.get_intent_filters("service", i)
-            if len(filters) > 0:
-                filter_list.append(filters)
-
-        pairs = zip(filter_list, [{
+        for expected in [{
             'action': ['android.intent.action.VIEW'],
             'category': [
                 'android.intent.category.APP_BROWSER',
@@ -437,37 +422,28 @@ class APKTest(unittest.TestCase):
         }, {
             'action': ['android.intent.action.MAIN'],
             'category': ['android.intent.category.LAUNCHER']
-        }, {
-            'action': ['android.intent.action.VIEW'],
-            'category':
-                ['android.intent.category.DEFAULT', 'android.intent.category.BROWSABLE'],
-            'data': [{
-                'scheme': 'testhost',
-                'host': 'testscheme',
-                'port': '0301',
-                'path': '/testpath',
-                'pathPattern': 'testpattern',
-                'mimeType': 'text/html'
-            }]
-        }, {
-            'action': ['android.intent.action.RESPOND_VIA_MESSAGE'],
-            'data': [{
-                'scheme': 'testhost',
-                'host': 'testscheme',
-                'port': '0301',
-                'path': '/testpath',
-                'pathPattern': 'testpattern',
-                'mimeType': 'text/html'
-            }, {
-                'scheme': 'testscheme2',
-                'host': 'testhost2',
-                'port': '0301',
-                'path': '/testpath2',
-                'pathPattern': 'testpattern2',
-                'mimeType': 'image/png'
-            }]
-        }])
-        self.assertFalse(any(x != y for x, y in pairs))
+        }]:
+            assert expected in filter_list
+        filter_list = []
+        for i in receivers:
+            filters = a.get_intent_filters("receiver", i)
+            if len(filters) > 0:
+                filter_list.append(filters)
+        self.assertEqual(filter_list, [{'action': ['android.intent.action.VIEW'],
+                                        'category': ['android.intent.category.DEFAULT',
+                                                     'android.intent.category.BROWSABLE'], 'data': [
+                {'scheme': 'testhost', 'host': 'testscheme', 'port': '0301', 'path': '/testpath',
+                 'pathPattern': 'testpattern', 'mimeType': 'text/html'}]}])
+        filter_list = []
+        for i in services:
+            filters = a.get_intent_filters("service", i)
+            if len(filters) > 0:
+                filter_list.append(filters)
+        self.assertEqual(filter_list, [{'action': ['android.intent.action.RESPOND_VIA_MESSAGE'], 'data': [
+            {'scheme': 'testhost', 'host': 'testscheme', 'port': '0301', 'path': '/testpath',
+             'pathPattern': 'testpattern', 'mimeType': 'text/html'},
+            {'scheme': 'testscheme2', 'host': 'testhost2', 'port': '0301', 'path': '/testpath2',
+             'pathPattern': 'testpattern2', 'mimeType': 'image/png'}]}])
 
     def testEffectiveTargetSdkVersion(self):
 
@@ -589,7 +565,7 @@ class APKTest(unittest.TestCase):
 
     def testFeatures(self):
         a = APK(os.path.join(test_dir, 'data/APK/com.example.android.tvleanback.apk'))
-        self.assertListEqual(list(a.get_features()), ["android.hardware.microphone",
+        self.assertListEqual(sorted(list(a.get_features())), ["android.hardware.microphone",
                                                       "android.hardware.touchscreen",
                                                       "android.software.leanback"])
         self.assertTrue(a.is_androidtv())
@@ -695,6 +671,10 @@ class APKTest(unittest.TestCase):
             self.assertIn('protectionLevel', perm['android.permission.INTERNET'])
             self.assertIn('permissionGroup', perm['android.permission.INTERNET'])
 
+    def testCustomPermissionProtectionLevel(self):
+        a = APK(os.path.join(test_dir, 'data/APK/com.example.android.tvleanback.apk'))
+        self.assertEqual(a.get_details_permissions()["com.example.android.tvleanback.ACCESS_VIDEO_DATA"][0], 'signature')
+
     def testShortNamesInManifest(self):
         """Test if shortnames are correctly handled"""
         a = apk.APK(os.path.join(test_dir, 'data/APK/AndroidManifest_ShortName.apk'))
@@ -710,7 +690,7 @@ class APKTest(unittest.TestCase):
         self.assertEqual(list(a.get_all_attribute_value("activity", "name"))[0], 'com.android.galaxy4.Galaxy4')
         self.assertEqual(list(a.get_all_attribute_value("activity", "name", format_value=False))[0], '.Galaxy4')
 
-        # Test some formattings
+        # Test some formatting
         self.assertEqual(a._format_value('foo'), 'com.android.galaxy4.foo')
         self.assertEqual(a._format_value('.foo'), 'com.android.galaxy4.foo')
         self.assertEqual(a._format_value('com.android.galaxy4.foo'), 'com.android.galaxy4.foo')
@@ -723,6 +703,15 @@ class APKTest(unittest.TestCase):
         self.assertEqual(a._format_value('com.android.galaxy4.foo'), 'com.android.galaxy4.foo')
         self.assertEqual(a._format_value('bla.bar.foo'), 'bla.bar.foo')
         self.assertEqual(a._format_value(None), None)
+
+    def testMultipleLocaleAppName(self):
+        """Test multiple locale appname"""
+        a = apk.APK(os.path.join(test_dir, 'data/APK/multiple_locale_appname_test.apk'))
+        self.assertEqual(a.get_app_name(), "values")
+        self.assertEqual(a.get_app_name(locale='en'), "values-en")
+        self.assertEqual(a.get_app_name(locale='zh-rCN'), "values-zh-rCN")
+        self.assertEqual(a.get_app_name(locale='zh-rTW'), "values-zh-rTW")
+        self.assertEqual(a.get_app_name(locale='ru-rRU'), "values-ru-rRU")
 
 
 if __name__ == '__main__':
